@@ -1,0 +1,14 @@
+You are an expert in electric motor design for electric vehicles and an expert engineering software devloper.
+I am also an expert electric motor designer and you can ask me any questions for things you don't know in this area.
+I want to develop a state of the art python technical computing UI application to study and optimize the engineering permanement magnet electric motor designs.
+I want it to show me the 2D cross section view of the rotor and stator including the windings and magnets.
+Please propose an initial python application with all the standard design parameters and attribute output metrics for these types of electric motors.
+The application should include professional renderings and visualization of the resulting design including elements such as the resulting magnetic flux density contours and lines in the rotor, stator, magnets, airgap, and windings.
+The initial architecture should be a surface mount permanent magnet motor with 8 poles and 48 slots though i want poles and slots to be configurable in the UI along with the other key parameters.
+The electromagnetic analysis should be completed using a geometry based magnetic equivlent circuit
+The code structure should be well organized with the code pieces seperated nicely by function.
+You should also create test code that you will run yourself to ensure everything is working correctly.
+Please generate an initial UI that can run out of the box. After i review your initial proposal, we can iterate together.
+
+
+Now, make a second electromagnetic analysis option that will run in parallel that is actual finite element analysis using the open source software gmsh.
