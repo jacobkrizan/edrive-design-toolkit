@@ -19,9 +19,9 @@ class MotorParameters:
     # Geometric Parameters (mm)
     stator_outer_diameter: float = 200.0
     stator_inner_diameter: float = 120.0
-    rotor_outer_diameter: float = 118.0
+    rotor_outer_diameter: float = 110.0  # Rotor core outer diameter
     rotor_inner_diameter: float = 40.0
-    airgap_length: float = 1.0
+    airgap_length: float = 1.0  # Gap between magnet outer surface and stator bore
     stack_length: float = 100.0
     
     # Slot Geometry
@@ -66,6 +66,16 @@ class MotorParameters:
         self.slot_pitch = np.pi * self.stator_inner_diameter / self.num_slots
         self.slots_per_pole_per_phase = self.num_slots / (self.num_poles * 3)
         self.electrical_frequency = self.rated_speed * self.num_poles / 120.0
+        
+        # Validate radial clearances for surface-mount PM motor
+        # Radial ordering: rotor_OD -> magnets -> airgap -> stator_ID
+        magnet_outer_radius = self.rotor_outer_diameter / 2 + self.magnet_thickness
+        required_stator_id = magnet_outer_radius * 2 + self.airgap_length * 2
+        
+        # Auto-adjust if needed to maintain proper airgap
+        if abs(self.stator_inner_diameter - required_stator_id) > 0.1:
+            # Adjust rotor OD to maintain specified airgap
+            self.rotor_outer_diameter = (self.stator_inner_diameter / 2 - self.airgap_length - self.magnet_thickness) * 2
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary"""

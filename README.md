@@ -4,9 +4,11 @@ Professional Python application for permanent magnet electric motor design and a
 
 ## Features
 
-- **Interactive UI**: Tkinter-based interface with real-time parameter adjustment
+- **Interactive UI**: Matplotlib-based interface with real-time parameter adjustment
 - **Comprehensive Motor Models**: Surface-mount permanent magnet motors with configurable poles and slots
-- **Electromagnetic Analysis**: Geometry-based Magnetic Equivalent Circuit (MEC) solver
+- **Dual Solver Architecture**: 
+  - Fast Magnetic Equivalent Circuit (MEC) solver for rapid design iterations
+  - High-fidelity Finite Element Analysis (FEA) using GetDP for detailed electromagnetic analysis
 - **Professional Visualization**: 
   - 2D cross-section views with rotor, stator, windings, and magnets
   - Flux density distribution contours
@@ -21,16 +23,31 @@ Professional Python application for permanent magnet electric motor design and a
 
 ## Installation
 
+### Prerequisites
+
+- **Python 3.8+**: Required for running the application
+- **GetDP 3.x**: Professional electromagnetic solver (companion to gmsh)
+  - Download from: https://getdp.info/
+  - Extract to `getdp-3.5.0-Windows64/` in the project directory
+  - Or install system-wide and update path in `fea_solver.py`
+
+### Setup
+
 1. Clone the repository:
 ```bash
 git clone https://github.com/jacobkrizan/edrive-design-toolkit.git
 cd edrive-design-toolkit
 ```
 
-2. Install dependencies:
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
+3. Install GetDP (Windows):
+   - Download GetDP from https://getdp.info/
+   - Extract to `getdp-3.5.0-Windows64/` in project folder
+   - Executable should be at `getdp-3.5.0-Windows64/getdp.exe`
 
 ## Usage
 
@@ -40,26 +57,27 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Run Tests
-
-Validate the electromagnetic calculations and geometry generation:
-
-```bash
-python test_motor.py
-```
+The application provides:
+- **MEC Solver Tab**: Fast analytical calculations for rapid design exploration
+- **FEA Solver Tab**: High-fidelity electromagnetic simulation using GetDP
+- Real-time parameter updates and visualization
 
 ## Project Structure
 
 ```
 edrive-design-toolkit/
-├── main.py                 # Main GUI application
-├── motor_parameters.py     # Motor parameter definitions and metrics
-├── geometry.py            # Geometric calculations and mesh generation
-├── magnetic_circuit.py    # MEC solver for electromagnetic analysis
-├── visualization.py       # Visualization and plotting functions
-├── test_motor.py         # Comprehensive test suite
-├── requirements.txt      # Python dependencies
-└── README.md            # This file
+├── main.py                      # Main GUI application
+├── motor_parameters.py          # Motor parameter definitions and metrics
+├── geometry.py                  # Geometric calculations and mesh generation
+├── magnetic_circuit.py          # MEC solver for electromagnetic analysis
+├── fea_solver.py                # FEA solver using GetDP
+├── visualization.py             # Visualization and plotting functions
+├── requirements.txt             # Python dependencies
+├── README.md                    # This file
+└── getdp-3.5.0-Windows64/       # GetDP electromagnetic solver
+    ├── getdp.exe                # GetDP executable
+    ├── examples/                # Example problems
+    └── templates/               # GetDP formulation templates
 ```
 
 ## Motor Parameters
@@ -82,12 +100,33 @@ edrive-design-toolkit/
 
 ## Electromagnetic Analysis
 
-The toolkit uses a **Magnetic Equivalent Circuit (MEC)** approach:
+The toolkit provides two complementary solvers:
+
+### MEC Solver (Fast)
+
+Magnetic Equivalent Circuit approach for rapid design iterations:
 
 1. Discretizes motor geometry into magnetic network nodes
 2. Calculates reluctances for airgap, magnets, teeth, and yoke
 3. Solves system of equations for magnetic potentials
 4. Computes flux distribution and performance metrics
+
+Advantages: Sub-second solve time, excellent for parametric studies
+
+### FEA Solver (High-Fidelity)
+
+Finite Element Analysis using GetDP for accurate electromagnetic simulation:
+
+1. Generates 2D mesh using gmsh with physical regions
+2. Formulates 2D magnetostatic problem with:
+   - Edge-based vector potential (Az) formulation
+   - Reluctivity-based material models
+   - Radial coercive field for permanent magnets
+   - Dirichlet boundary conditions (A=0 at outer boundary)
+3. Solves using GetDP professional solver
+4. Post-processes flux density distribution
+
+Advantages: High accuracy, captures fringing fields and saturation effects
 
 ## Visualization
 
@@ -125,25 +164,32 @@ The MEC solver creates a network with:
 - Automatic phase assignment to slots
 - Alternating coil polarity for proper field interaction
 
-## Testing
+## Dependencies
 
-The test suite (`test_motor.py`) validates:
-- Parameter initialization
-- Geometry generation
-- MEC solver accuracy
-- Performance calculations
-- Multiple motor configurations
-- Rotor position variations
+Core Python packages (see `requirements.txt`):
+- **numpy**: Numerical computations
+- **scipy**: Sparse matrix solvers
+- **matplotlib**: Visualization and UI
+- **gmsh**: Mesh generation for FEA
+- **meshio**: Mesh I/O utilities
+
+External Solvers:
+- **GetDP**: Professional open-source electromagnetic solver
+  - Companion to gmsh
+  - Magnetostatic formulation
+  - Robust sparse matrix solvers
 
 ## Future Enhancements
 
 Potential additions:
-- Finite Element Analysis (FEA) integration
 - Interior permanent magnet (IPM) topologies
-- Thermal analysis with CFD
+- 3D electromagnetic analysis
+- Thermal analysis with CFD coupling
 - Mechanical stress analysis
-- Multi-objective optimization
-- Export to CAD formats
+- Multi-objective optimization algorithms
+- Export to CAD formats (STEP, IGES)
+- Transient electromagnetic analysis
+- Demagnetization analysis
 
 ## License
 
@@ -157,3 +203,9 @@ Expert in electric motor design for electric vehicles
 ## Acknowledgments
 
 Built with Python, NumPy, SciPy, and Matplotlib for professional motor design analysis.
+
+Electromagnetic solvers:
+- **GetDP**: Professional open-source electromagnetic solver (https://getdp.info/)
+- **gmsh**: Advanced mesh generation (https://gmsh.info/)
+
+Special thanks to the open-source scientific computing community.

@@ -61,16 +61,17 @@ class MotorGeometry:
     
     def _create_slot(self, angle: float) -> Dict:
         """Create slot geometry at given angle"""
-        r_inner = self.params.stator_inner_diameter / 2
-        slot_angle = 2 * np.pi / self.params.num_slots
+        r_bore = self.params.stator_inner_diameter / 2
+        slot_angle = 2 * np.pi / int(self.params.num_slots)
         
-        # Slot opening angle
-        opening_angle = self.params.slot_opening / r_inner
+        # Slot opening angle at bore
+        opening_angle = self.params.slot_opening / r_bore
         
         # Slot body angle (wider than opening)
-        body_width = slot_angle * 0.6  # 60% of slot pitch
+        body_width = slot_angle * 0.5  # 50% of slot pitch
         
-        # Create slot profile
+        # Create slot profile - extending INWARD from bore into stator
+        # Slots are carved into the stator, not extending into airgap
         angles = [
             angle - opening_angle / 2,
             angle - body_width / 2,
@@ -81,12 +82,12 @@ class MotorGeometry:
         ]
         
         radii = [
-            r_inner,
-            r_inner + 2,
-            r_inner + self.params.slot_depth,
-            r_inner + self.params.slot_depth,
-            r_inner + 2,
-            r_inner
+            r_bore,
+            r_bore,
+            r_bore + self.params.slot_depth,
+            r_bore + self.params.slot_depth,
+            r_bore,
+            r_bore
         ]
         
         x = [r * np.cos(a) for r, a in zip(radii, angles)]
@@ -95,8 +96,8 @@ class MotorGeometry:
         slot = {
             'angle': angle,
             'vertices': np.column_stack([x, y]),
-            'center': self._calculate_slot_center(angle, r_inner),
-            'area': self._calculate_slot_area(body_width, r_inner)
+            'center': self._calculate_slot_center(angle, r_bore),
+            'area': self._calculate_slot_area(body_width, r_bore)
         }
         
         return slot
@@ -140,18 +141,18 @@ class MotorGeometry:
         
         return magnet
     
-    def _calculate_slot_center(self, angle: float, r_inner: float) -> np.ndarray:
+    def _calculate_slot_center(self, angle: float, r_bore: float) -> np.ndarray:
         """Calculate center point of slot"""
-        r_center = r_inner + self.params.slot_depth / 2
+        r_center = r_bore + self.params.slot_depth / 2
         x = r_center * np.cos(angle)
         y = r_center * np.sin(angle)
         return np.array([x, y])
     
-    def _calculate_slot_area(self, width: float, r_inner: float) -> float:
+    def _calculate_slot_area(self, width: float, r_bore: float) -> float:
         """Calculate slot cross-sectional area"""
         # Approximate as trapezoid
-        r_outer = r_inner + self.params.slot_depth
-        w1 = r_inner * width
+        r_outer = r_bore + self.params.slot_depth
+        w1 = r_bore * width
         w2 = r_outer * width
         area = self.params.slot_depth * (w1 + w2) / 2
         return area
@@ -163,23 +164,37 @@ class MotorGeometry:
         # 3-phase distributed winding
         num_slots = int(self.params.num_slots)
         num_poles = int(self.params.num_poles)
-        slots_per_pole = num_slots / num_poles
-        slots_per_phase_per_pole = slots_per_pole / 3
+        
+        # Validate configuration
+        if num_poles == 0 or num_slots == 0:
+            return winding_config
+        
+        # Calculate slots per pole per phase (q)
+        slots_per_pole_per_phase = num_slots / (num_poles * 3)
+        
+        # For distributed winding, we have q consecutive slots per phase per pole
+        # Each phase belt spans q slots, then the next phase, etc.
+        # Polarity alternates every pole pair
+        
+        phases = ['A', 'B', 'C']
         
         for slot_idx in range(num_slots):
-            # Determine which phase and polarity
-            phase_group = (slot_idx % (num_slots // num_poles)) // (slots_per_pole / 3)
-            pole_group = slot_idx // (num_slots // num_poles)
+            # Determine which pole this slot belongs to
+            pole_number = int(slot_idx * num_poles / num_slots)
             
-            if phase_group < 1:
-                phase = 'A'
-            elif phase_group < 2:
-                phase = 'B'
-            else:
-                phase = 'C'
+            # Position within the pole (0 to slots_per_pole - 1)
+            slot_in_pole = slot_idx - (pole_number * num_slots / num_poles)
             
-            # Alternate polarity for coil sides
-            polarity = 1 if pole_group % 2 == 0 else -1
+            # Determine which phase belt (0=A, 1=B, 2=C)
+            phase_belt = int(slot_in_pole / slots_per_pole_per_phase)
+            phase_belt = min(phase_belt, 2)  # Ensure it's 0, 1, or 2
+            
+            phase = phases[phase_belt]
+            
+            # Polarity alternates between north and south poles
+            # North poles (even pole numbers): positive polarity
+            # South poles (odd pole numbers): negative polarity
+            polarity = 1 if pole_number % 2 == 0 else -1
             
             angle = 2 * np.pi * slot_idx / num_slots
             winding_config[phase].append({
@@ -193,7 +208,10 @@ class MotorGeometry:
     
     def get_airgap_mesh(self, n_points: int = 360) -> np.ndarray:
         """Generate mesh points in the airgap for flux calculations"""
-        r_airgap = (self.params.stator_inner_diameter + self.params.rotor_outer_diameter) / 4
+        # Airgap is between magnet outer surface and stator bore
+        r_magnet_outer = self.params.rotor_outer_diameter / 2 + self.params.magnet_thickness
+        r_stator_bore = self.params.stator_inner_diameter / 2
+        r_airgap = (r_magnet_outer + r_stator_bore) / 2  # Middle of airgap
         theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
         x = r_airgap * np.cos(theta)
         y = r_airgap * np.sin(theta)
