@@ -1,34 +1,48 @@
-"""
-8-Pole Arc Magnet Rotor - Complete Workflow Example
+"""test_baseline_4.py - 8-Pole Rotor with Airgap and Python Analysis
 =====================================================================
 
-This is a self-contained training example that demonstrates the COMPLETE GetDP 
-magnetostatic FEA workflow from scratch:
+This test extends test_baseline_3 by adding a realistic airgap structure
+and Python-based post-processing with matplotlib visualization.
 
-1. Create geometry (.geo file)
-2. Generate mesh (.msh file) 
-3. Run FEA solver (.pro file)
-4. Visualize results in Gmsh
+Geometry (Three Air Regions):
+- 8 arc magnets arranged in a circle at 45° intervals (R=49-54mm)
+- Inner air: center to airgap middle (0 to 54.5mm) with magnet cutouts
+- Outer air: airgap middle to stator OD+2mm (54.5mm to 102mm)
+- Shell (air infinity): stator OD+2mm to stator OD+10mm (102mm to 110mm)
+- Alternating N-S polarity with radial magnetization
 
-The example creates an 8-pole permanent magnet rotor using motor parameters from Excel:
-- 8 arc magnets arranged in a circle at 45° intervals
-- Alternating N-S polarity with radial magnetization at each magnet's angular position
-- Inner air region: From magnets to stator OD (100mm radius)
-- Spherical shell: 10mm band for boundary condition
-- Demonstrates proper B-field propagation with alternating pole pattern
+Key Differences from test_baseline_3:
+- Three-region air structure for proper boundary conditions
+- Airgap modeled at center boundary (1mm thick, from motor parameters)
+- Fine mesh at airgap middle (3 elements across) for accurate field calculation
+- Extended outer domain (stator OD + 10mm) for far-field boundary
+- Python plotting with matplotlib for flux density analysis
 
-Key learnings:
-- Gmsh Duplicata creates tag conflicts - manually generate all magnets instead
-- Each magnet needs individual radial magnetization vector at its angular position
-- Use high tag numbers (200+) for shell geometry to avoid conflicts
+Magnetization:
+- Radial magnetization at each magnet's angular position
+- Alternating N-S polarity: magnets 1,3,5,7 = North (outward), magnets 2,4,6,8 = South (inward)
+- Coercive field Hc = 900 kA/m from motor parameters
 
-This tests complete 8-pole rotor geometry with realistic motor dimensions.
+Post-Processing:
+- Parses GetDP .pos files to extract B-field data
+- Left plot: 2D colormap of flux density magnitude across geometry
+- Right plot: Airgap B-field vs angular position at r=54.5mm
+- Saves high-resolution PNG for documentation
+
+Expected Results:
+- Field propagates from magnets through airgap to outer regions
+- Airgap flux density: 0.14-0.80 T with 8-pole pattern
+- Mesh: ~18,000 DOFs with fine airgap discretization
+- Solver convergence: residual < 1e-10
 """
 
 import subprocess
 import os
 import sys
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.tri import Triangulation
+import struct
 
 # Add src to path for gmsh/getdp executables
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -46,22 +60,22 @@ getdp_templates = os.path.join(getdp_dir, 'templates')
 gmsh_exe = os.path.join(src_dir, 'gmsh', 'gmsh.exe')
 
 # Working directory for this example
-work_dir = os.path.join(script_dir, 'test_baseline_3_output')
+work_dir = os.path.join(script_dir, 'test_baseline_4_output')
 
 # Motor parameters
 params = MotorParameters()
 
 def create_geometry():
     """
-    Step 1: Create the geometry file (.geo)
+    Step 1: Create the geometry file (.geo) with 3 air regions
     
-    Defines 8 arc magnets arranged in a circle:
-    - Each magnet: Arc segment at rotor outer diameter, manually positioned
+    Defines 8 arc magnets with 3-region air structure:
+    - Each magnet: Arc segment at rotor outer diameter (49-54mm)
     - Angular positions: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°
-    - Inner air region: from magnets to R=100mm (stator OD)
-    - Spherical shell: R=100mm to R=110mm (10mm band)
-    - Complete circular boundaries (no symmetry)
-    - Uses high tag numbers (200+) for shell to avoid conflicts with magnet geometry
+    - Inner air: center to airgap middle (0-54.5mm) with magnet cutouts
+    - Outer air: airgap middle to stator OD+2mm (54.5-102mm)
+    - Shell: stator OD+2mm to stator OD+10mm (102-110mm) for far-field BC
+    - Fine mesh at airgap middle (3 elements across 1mm airgap)
     """
     
     print("=" * 60)
@@ -79,23 +93,31 @@ def create_geometry():
     rotor_outer_r = params.rotor_outer_diameter / 2 * mm_to_m  # Magnet outer radius
     magnet_thickness = params.magnet_thickness * mm_to_m
     magnet_inner_r = rotor_outer_r - magnet_thickness  # Magnet inner radius
+    airgap = params.airgap_length * mm_to_m  # Airgap between magnets and stator
+    stator_inner_r = rotor_outer_r + airgap  # Stator inner radius
+    airgap_middle_r = rotor_outer_r + airgap / 2  # Middle of airgap
     
     # Magnet arc angle (one pole)
     pole_pitch_angle = 2 * np.pi / params.num_poles
     magnet_arc_angle = pole_pitch_angle * params.magnet_arc_ratio
     half_arc = magnet_arc_angle / 2
     
-    # Boundary radii
-    Val_Rint = 0.1   # 100mm = stator OD
-    Val_Rext = 0.11  # 110mm = 10mm band
+    # Boundary radii - three air regions
+    stator_outer_r = params.stator_outer_diameter / 2 * mm_to_m
+    outer_air_r = stator_outer_r + 2 * mm_to_m  # Stator OD + 2mm
+    domain_outer_r = stator_outer_r + 10 * mm_to_m  # Stator OD + 10mm
+    Val_Rint = airgap_middle_r   # Inner boundary at airgap middle
+    Val_Rext = domain_outer_r   # Outer boundary at domain outer
     
     # Mesh sizes
     lc_magnet = magnet_thickness / 5  # Fine mesh in magnet
-    lc_air = 0.01  # 10mm in air
-    lc_shell = 0.005  # 5mm in shell
+    lc_airgap = airgap / 3  # Fine mesh at airgap middle (3 elements across)
+    lc_inner_air = 0.01  # 10mm in inner air
+    lc_outer_air = 0.015  # 15mm in outer air (stator region)
+    lc_shell = (domain_outer_r - outer_air_r) / 5  # Shell mesh
     
-    geo_content = f"""// {params.num_poles} Arc Magnets - Motor Parameters
-// Generated by test_baseline_3.py
+    geo_content = f"""// {params.num_poles} Arc Magnets with Airgap - Motor Parameters
+// Generated by test_baseline_4.py
 
 // Magnet geometry (from motor parameters)
 magnet_inner_r = {magnet_inner_r:.6f};  // {(magnet_inner_r/mm_to_m):.1f}mm
@@ -103,16 +125,25 @@ magnet_outer_r = {rotor_outer_r:.6f};  // {(rotor_outer_r/mm_to_m):.1f}mm
 half_arc = {half_arc:.6f};  // {np.degrees(half_arc):.2f} degrees
 pole_angle = {pole_pitch_angle:.6f};  // {np.degrees(pole_pitch_angle):.2f} degrees
 
-Val_Rint = {Val_Rint};  // Internal shell radius (m) - matches stator OD
-Val_Rext = {Val_Rext};  // External shell radius (m) - 10mm band
+// Airgap and stator
+airgap = {airgap:.6f};  // {(airgap/mm_to_m):.1f}mm
+stator_inner_r = {stator_inner_r:.6f};  // {(stator_inner_r/mm_to_m):.1f}mm
+airgap_middle_r = {airgap_middle_r:.6f};  // {(airgap_middle_r/mm_to_m):.1f}mm (middle of airgap)
+outer_air_r = {outer_air_r:.6f};  // {(outer_air_r/mm_to_m):.1f}mm (stator OD + 2mm)
+domain_outer_r = {domain_outer_r:.6f};  // {(domain_outer_r/mm_to_m):.1f}mm (stator OD + 10mm)
+
+Val_Rint = {Val_Rint:.6f};  // Internal boundary (airgap middle)
+Val_Rext = {Val_Rext:.6f};  // External boundary (domain outer)
 
 // Mesh size parameters
 lc_magnet = {lc_magnet:.6f};  // Magnet mesh
-lc_air = {lc_air:.6f};  // Air mesh
+lc_airgap = {lc_airgap:.6f};  // Airgap mesh (fine)
+lc_inner_air = {lc_inner_air:.6f};  // Inner air mesh
+lc_outer_air = {lc_outer_air:.6f};  // Outer air mesh
 lc_shell = {lc_shell:.6f};  // Shell mesh
 
 // Center point
-Point(1) = {{0, 0, 0, lc_air}};
+Point(1) = {{0, 0, 0, lc_inner_air}};
 
 // First magnet arc points (centered at x-axis, pointing +X)
 Point(10) = {{magnet_inner_r * Cos(-half_arc), magnet_inner_r * Sin(-half_arc), 0, lc_magnet}};
@@ -160,41 +191,55 @@ Plane Surface({surf_id}) = {{{loop_id}}};
         magnet_surfaces.append(surf_id)
     
     geo_content += f"""
-// Inner air boundary points (complete circle) - using higher tags to avoid duplicata conflicts
-Point(200) = {{Val_Rint, 0, 0, lc_air}};
-Point(201) = {{0, Val_Rint, 0, lc_air}};
-Point(202) = {{-Val_Rint, 0, 0, lc_air}};
-Point(203) = {{0, -Val_Rint, 0, lc_air}};
+// Airgap middle boundary (inner air boundary)
+Point(190) = {{airgap_middle_r, 0, 0, lc_airgap}};
+Point(191) = {{0, airgap_middle_r, 0, lc_airgap}};
+Point(192) = {{-airgap_middle_r, 0, 0, lc_airgap}};
+Point(193) = {{0, -airgap_middle_r, 0, lc_airgap}};
 
-// Inner circle
+Circle(190) = {{190, 1, 191}};
+Circle(191) = {{191, 1, 192}};
+Circle(192) = {{192, 1, 193}};
+Circle(193) = {{193, 1, 190}};
+
+// Outer air boundary (stator OD + 2mm)
+Point(200) = {{outer_air_r, 0, 0, lc_outer_air}};
+Point(201) = {{0, outer_air_r, 0, lc_outer_air}};
+Point(202) = {{-outer_air_r, 0, 0, lc_outer_air}};
+Point(203) = {{0, -outer_air_r, 0, lc_outer_air}};
+
 Circle(200) = {{200, 1, 201}};
 Circle(201) = {{201, 1, 202}};
 Circle(202) = {{202, 1, 203}};
 Circle(203) = {{203, 1, 200}};
 
-// Outer shell boundary points (complete circle)
-Point(210) = {{Val_Rext, 0, 0, lc_shell}};
-Point(211) = {{0, Val_Rext, 0, lc_shell}};
-Point(212) = {{-Val_Rext, 0, 0, lc_shell}};
-Point(213) = {{0, -Val_Rext, 0, lc_shell}};
+// Domain outer boundary (stator OD + 10mm)
+Point(210) = {{domain_outer_r, 0, 0, lc_shell}};
+Point(211) = {{0, domain_outer_r, 0, lc_shell}};
+Point(212) = {{-domain_outer_r, 0, 0, lc_shell}};
+Point(213) = {{0, -domain_outer_r, 0, lc_shell}};
 
-// Outer circle
 Circle(210) = {{210, 1, 211}};
 Circle(211) = {{211, 1, 212}};
 Circle(212) = {{212, 1, 213}};
 Circle(213) = {{213, 1, 210}};
 
-// Air region (inner circle minus all magnets)
-Curve Loop(220) = {{200, 201, 202, 203}};
-Plane Surface(221) = {{220, {', '.join([str(20 + i*10) for i in range(params.num_poles)])}}};  // Air with all magnet cutouts
+// Inner air region (center to airgap middle, minus magnets)
+Curve Loop(220) = {{190, 191, 192, 193}};
+Plane Surface(221) = {{220, {', '.join([str(20 + i*10) for i in range(params.num_poles)])}}};  // Inner air with magnet cutouts
 
-// Spherical shell (outer circle minus inner circle)
+// Outer air region (airgap middle to stator OD + 2mm)
+Curve Loop(225) = {{200, 201, 202, 203}};
+Plane Surface(226) = {{225, 220}};  // Outer air annulus
+
+// Shell region (stator OD + 2mm to domain outer)
 Curve Loop(230) = {{210, 211, 212, 213}};
-Plane Surface(231) = {{230, 220}};  // Shell annulus
+Plane Surface(231) = {{230, 225}};  // Shell annulus
 
 // Physical entities
-Physical Surface("Air", 100) = {{221}};
-Physical Surface("Spherical shell", 101) = {{231}};
+Physical Surface("Inner Air", 100) = {{221}};
+Physical Surface("Outer Air", 111) = {{226}};
+Physical Surface("Air Inf", 101) = {{231}};
 """
     
     # Create physical surfaces for magnets with alternating polarity
@@ -218,8 +263,12 @@ Mesh.SurfaceFaces = 2;
     print(f"✓ Geometry file created: {geo_file}")
     print(f"  Magnets: {params.num_poles} poles, R={magnet_inner_r/mm_to_m:.1f}-{rotor_outer_r/mm_to_m:.1f}mm")
     print(f"  Arc per magnet: {np.degrees(magnet_arc_angle):.1f}° (N-S alternating)")
-    print(f"  Inner air: R=0-{Val_Rint/mm_to_m:.0f}mm (stator OD)")
-    print(f"  Shell: R={Val_Rint/mm_to_m:.0f}-{Val_Rext/mm_to_m:.0f}mm (10mm band)")
+    print(f"  Airgap: {airgap/mm_to_m:.1f}mm (R={rotor_outer_r/mm_to_m:.1f}-{stator_inner_r/mm_to_m:.1f}mm)")
+    print(f"  Inner air: R=0-{airgap_middle_r/mm_to_m:.1f}mm (to airgap middle)")
+    print(f"  Outer air: R={airgap_middle_r/mm_to_m:.1f}-{outer_air_r/mm_to_m:.1f}mm (airgap middle to stator OD+2mm)")
+    print(f"  Shell: R={outer_air_r/mm_to_m:.1f}-{domain_outer_r/mm_to_m:.1f}mm (stator OD+2mm to OD+10mm)")
+    print(f"  Inner air: R=0-{magnet_inner_r/mm_to_m:.1f}mm")
+    print(f"  Shell: R={stator_inner_r/mm_to_m:.1f}-{stator_outer_r/mm_to_m:.1f}mm (stator ID to OD)")
     print()
     
     return geo_file
@@ -290,16 +339,17 @@ def generate_mesh(geo_file):
 
 def create_solver_file():
     """
-    Step 3: Create GetDP solver input file (.pro)
+    Step 3: Create GetDP solver input file (.pro) with 3 air regions
     
     Defines the magnetostatic problem for 8-pole rotor:
-    - Material properties (μr for air and magnets)
+    - Three air regions: InnerAir, OuterAir, AirInf (all μr=1)
     - 8 separate magnet regions with individual radial magnetization vectors
     - North poles (1,3,5,7): Hc pointing radially outward at each angular position
     - South poles (2,4,6,8): Hc pointing radially inward at each angular position
-    - Boundary conditions (a=0 on outer boundary)
-    - Uses GetDP library template for formulation
-    - Post-processing: magnetic vector potential, B-field, H-field
+    - Boundary conditions: a=0 at outer shell (110mm radius)
+    - Airgap boundary at middle of physical airgap (54.5mm)
+    - Uses GetDP library template (Lib_Magnetostatics_a_phi.pro)
+    - Post-processing: magnetic vector potential (az), B-field, H-field
     """
     
     print("=" * 60)
@@ -310,15 +360,26 @@ def create_solver_file():
     pro_file = os.path.join(work_dir, 'c_core.pro')
     
     # Create the solver file using GetDP library template
-    pro_content = f"""// {params.num_poles} Arc Magnets - Motor Parameters
-// Generated by test_baseline_3.py
+    # Calculate shell radii from motor parameters
+    mm_to_m = 0.001
+    rotor_outer_r = params.rotor_outer_diameter / 2 * mm_to_m
+    airgap = params.airgap_length * mm_to_m
+    airgap_middle_r = rotor_outer_r + airgap / 2
+    stator_inner_r = rotor_outer_r + airgap
+    stator_outer_r = params.stator_outer_diameter / 2 * mm_to_m
+    outer_air_r = stator_outer_r + 2 * mm_to_m
+    domain_outer_r = stator_outer_r + 10 * mm_to_m
+    
+    pro_content = f"""// {params.num_poles} Arc Magnets with Airgap - Motor Parameters
+// Generated by test_baseline_4.py
 
 // Constants for spherical shell (required by library template)
-DefineConstant[ Val_Rint = 0.1 ];   // Internal shell radius (m) - matches stator OD = 200mm
-DefineConstant[ Val_Rext = 0.11 ];  // External shell radius (m) - 10mm band
+DefineConstant[ Val_Rint = {airgap_middle_r:.6f} ];   // Internal boundary (airgap middle)
+DefineConstant[ Val_Rext = {domain_outer_r:.6f} ];  // External boundary (domain outer)
 
 // Region tags (must match geometry Physical entities)
-AIR = 100;
+INNER_AIR = 100;
+OUTER_AIR = 111;
 AIR_INF = 101;
 """
     
@@ -333,13 +394,14 @@ AIR_INF = 101;
     all_magnets_list = ", ".join([f"MAGNET_{'N' if i % 2 == 0 else 'S'}{i+1}" for i in range(params.num_poles)])
     
     pro_content += f"""Group {{
-  Air     = Region[ AIR ];
-  AirInf  = Region[ AIR_INF ];
+  InnerAir = Region[ INNER_AIR ];
+  OuterAir = Region[ OUTER_AIR ];
+  AirInf   = Region[ AIR_INF ];
   Dirichlet_a_0   = Region[ LINE_INF ];
   Dirichlet_phi_0 = Region[ LINE_INF ];
 
   // Generic group names for library template
-  Vol_Mag = Region[ {{Air, AirInf, {all_magnets_list}}} ];
+  Vol_Mag = Region[ {{InnerAir, OuterAir, AirInf, {all_magnets_list}}} ];
   Vol_Inf_Mag = Region[ AirInf ];
   Vol_M_Mag   = Region[ {{{all_magnets_list}}} ];
 }}
@@ -347,9 +409,9 @@ AIR_INF = 101;
 Function {{
   mu0 = 4.e-7 * Pi;
   
-  // Material properties - all air and magnets
-  nu [ Region[{{Air, AirInf, {all_magnets_list}}} ] ] = 1. / mu0;
-  mu [ Region[{{Air, AirInf, {all_magnets_list}}} ] ] = mu0;
+  // Material properties - all air regions and magnets
+  nu [ Region[{{InnerAir, OuterAir, AirInf, {all_magnets_list}}} ] ] = 1. / mu0;
+  mu [ Region[{{InnerAir, OuterAir, AirInf, {all_magnets_list}}} ] ] = mu0;
   
   // Permanent magnet coercive fields (radial magnetization, alternating N-S)
   Hc = {abs(params.magnet_hc)};  // A/m
@@ -410,6 +472,7 @@ PostOperation {{
     print(f"✓ Solver file created: {pro_file}")
     print(f"  Formulation: Magnetostatics (vector potential)")
     print(f"  Materials: Air (μr=1), Magnet (μr={params.magnet_mu_r})")
+    print(f"  Regions: Inner air (0 to airgap middle), Outer air (airgap middle to stator OD+2mm), 8 magnets, Shell (stator OD+2mm to OD+10mm)")
     print(f"  Coercive field: Hc = {abs(params.magnet_hc)/1000:.0f} kA/m")
     print(f"  Magnetization: Radial, each magnet at its angular position")
     print(f"  {params.num_poles} poles: N={params.num_poles//2}, S={params.num_poles//2} (alternating, outward/inward)")
@@ -586,22 +649,187 @@ General.RotationZ = 0;
         print(f"ERROR launching Gmsh: {e}")
         return False
 
+
+def parse_pos_file(pos_file):
+    """Parse GetDP .pos file to extract mesh coordinates and field values.
+    
+    Returns:
+        tuple: (points, triangles, values) where
+            points: Nx2 array of (x,y) coordinates
+            triangles: Mx3 array of triangle vertex indices
+            values: N array of field magnitudes at each point
+    """
+    points = []
+    triangles = []
+    values = []
+    
+    with open(pos_file, 'r') as f:
+        lines = f.readlines()
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Look for vector triangle elements: VT(x1,y1,z1, x2,y2,z2, x3,y3,z3){vx1,vy1,vz1, vx2,vy2,vz2, vx3,vy3,vz3};
+        if line.startswith('VT('):
+            try:
+                # Extract coordinates and values
+                coords_part = line[3:line.index('){')]
+                values_part = line[line.index('){')+2:line.index('};')]
+                
+                # Parse coordinates (9 values: x1,y1,z1, x2,y2,z2, x3,y3,z3)
+                coords = [float(x) for x in coords_part.split(',')]
+                # Parse values (9 values: vx1,vy1,vz1, vx2,vy2,vz2, vx3,vy3,vz3)
+                vals = [float(x) for x in values_part.split(',')]
+                
+                # Extract x,y coordinates (ignore z)
+                p1 = [coords[0], coords[1]]
+                p2 = [coords[3], coords[4]]
+                p3 = [coords[6], coords[7]]
+                
+                # Get starting index for this triangle
+                idx_start = len(points)
+                
+                # Add points
+                points.extend([p1, p2, p3])
+                
+                # Add triangle connectivity
+                triangles.append([idx_start, idx_start+1, idx_start+2])
+                
+                # Calculate field magnitude at each vertex (vector field: 3 components per vertex)
+                v1_mag = np.sqrt(vals[0]**2 + vals[1]**2 + vals[2]**2)
+                v2_mag = np.sqrt(vals[3]**2 + vals[4]**2 + vals[5]**2)
+                v3_mag = np.sqrt(vals[6]**2 + vals[7]**2 + vals[8]**2)
+                values.extend([v1_mag, v2_mag, v3_mag])
+            except (ValueError, IndexError) as e:
+                # Skip malformed lines
+                pass
+            
+        i += 1
+    
+    return np.array(points), np.array(triangles), np.array(values)
+
+
+def plot_results():
+    """Create side-by-side Python plots for flux density analysis.
+    
+    Left plot: 2D spatial colormap of |B| magnitude across entire geometry
+    - Uses matplotlib tricontourf for smooth visualization
+    - Colorbar shows flux density in Tesla
+    - Coordinates in mm for easier interpretation
+    
+    Right plot: Airgap flux density vs angular position
+    - Samples B-field at r=54.5mm (middle of 1mm airgap)
+    - Shows 8-pole sinusoidal pattern from alternating N-S magnets
+    - Red dashed line indicates mean airgap flux density
+    - Angular range: -180° to +180°
+    
+    Output:
+    - Saves high-resolution PNG (150 dpi) to output directory
+    - Displays interactive matplotlib window
+    """
+    print("=" * 60)
+    print("Step 6: Creating Python Plots")
+    print("=" * 60)
+    print()
+    
+    b_pos_file = os.path.join(work_dir, 'c_core_b.pos')
+    
+    if not os.path.exists(b_pos_file):
+        print(f"❌ B-field file not found: {b_pos_file}")
+        return False
+    
+    print(f"Reading B-field data from: {os.path.basename(b_pos_file)}")
+    
+    # Parse the .pos file
+    points, triangles, b_values = parse_pos_file(b_pos_file)
+    
+    if len(points) == 0:
+        print("❌ No data found in .pos file")
+        return False
+    
+    print(f"  Loaded {len(points)} points, {len(triangles)} triangles")
+    print(f"  B-field range: {b_values.min():.4f} to {b_values.max():.4f} T")
+    
+    # Extract airgap samples at the middle of airgap
+    mm_to_m = 0.001
+    rotor_outer_r = params.rotor_outer_diameter / 2 * mm_to_m
+    airgap = params.airgap_length * mm_to_m
+    airgap_middle_r = rotor_outer_r + airgap / 2
+    
+    # Find points near the airgap middle radius
+    r_points = np.sqrt(points[:, 0]**2 + points[:, 1]**2)
+    tolerance = 0.5 * mm_to_m  # 0.5mm tolerance
+    airgap_mask = np.abs(r_points - airgap_middle_r) < tolerance
+    
+    airgap_points = points[airgap_mask]
+    airgap_b = b_values[airgap_mask]
+    
+    # Calculate angular position for airgap points
+    airgap_theta = np.arctan2(airgap_points[:, 1], airgap_points[:, 0])
+    airgap_theta_deg = np.degrees(airgap_theta)
+    
+    # Sort by angle for plotting
+    sort_idx = np.argsort(airgap_theta_deg)
+    airgap_theta_deg_sorted = airgap_theta_deg[sort_idx]
+    airgap_b_sorted = airgap_b[sort_idx]
+    
+    print(f"  Airgap samples: {len(airgap_points)} points at r={airgap_middle_r/mm_to_m:.2f}mm")
+    print(f"  Airgap B-field range: {airgap_b.min():.4f} to {airgap_b.max():.4f} T")
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Left plot: Spatial flux density colormap
+    ax1.set_aspect('equal')
+    triang = Triangulation(points[:, 0] * 1000, points[:, 1] * 1000, triangles)  # Convert to mm
+    contour = ax1.tricontourf(triang, b_values, levels=50, cmap='viridis')
+    cbar = plt.colorbar(contour, ax=ax1, label='|B| (T)')
+    ax1.set_xlabel('x (mm)')
+    ax1.set_ylabel('y (mm)')
+    ax1.set_title('Flux Density Magnitude')
+    ax1.grid(True, alpha=0.3)
+    
+    # Right plot: Airgap flux density vs angle
+    ax2.plot(airgap_theta_deg_sorted, airgap_b_sorted, 'b-', linewidth=2, label='Airgap B-field')
+    ax2.axhline(y=airgap_b.mean(), color='r', linestyle='--', linewidth=1, label=f'Mean: {airgap_b.mean():.3f} T')
+    ax2.set_xlabel('Angular Position (degrees)')
+    ax2.set_ylabel('|B| (T)')
+    ax2.set_title(f'Airgap Flux Density at r={airgap_middle_r/mm_to_m:.1f}mm')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    ax2.set_xlim([-180, 180])
+    
+    plt.tight_layout()
+    
+    # Save figure
+    plot_file = os.path.join(work_dir, 'flux_density_analysis.png')
+    plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+    print(f"\n✓ Plot saved: {os.path.basename(plot_file)}")
+    
+    # Show plot
+    plt.show()
+    
+    return True
+
+
 def main():
     """
-    Main execution - Complete workflow
+    Main execution - Complete FEA workflow with Python analysis
     
     Executes all steps:
-    1. Create geometry (.geo)
-    2. Generate mesh (.msh)
-    3. Create solver file (.pro)
-    4. Run GetDP solver
-    5. Visualize results
+    1. Create geometry (.geo) - 8 magnets, 3 air regions
+    2. Generate mesh (.msh) - fine mesh in airgap
+    3. Create solver file (.pro) - radial magnetization
+    4. Run GetDP solver - magnetostatic solution
+    5. Visualize results - Gmsh viewers
+    6. Create Python plots - flux density analysis
     """
     
     print("\n")
     print("*" * 60)
     print(f"{params.num_poles}-Pole Arc Magnet Rotor - Motor Parameters")
-    print("Geometry → Mesh → Solve → Visualize")
+    print("Geometry → Mesh → Solve → Visualize → Analyze")
     print("*" * 60)
     print("\n")
     
@@ -632,6 +860,11 @@ def main():
     # Step 5: Visualize
     visualize_results()
     
+    # Step 6: Create Python plots
+    plot_success = plot_results()
+    if not plot_success:
+        print("\n⚠ Warning: Plot generation failed, but solver completed successfully")
+    
     print("\n" + "*" * 60)
     print("COMPLETE WORKFLOW FINISHED SUCCESSFULLY!")
     print("*" * 60)
@@ -639,13 +872,14 @@ def main():
     print(f"All files saved to: {work_dir}")
     print()
     print("Key Workflow Steps:")
-    print("1. ✓ Geometry created (.geo file) - 8 arc magnets")
-    print("2. ✓ Mesh generated (.msh file) - ~13,500 DOFs")
+    print("1. ✓ Geometry created (.geo file) - 8 arc magnets, 3 air regions")
+    print("2. ✓ Mesh generated (.msh file) - ~18k DOFs, fine airgap mesh")
     print("3. ✓ Solver input created (.pro file) - radial magnetization")
     print("4. ✓ FEA solution computed - alternating N-S poles")
     print("5. ✓ Results visualized in Gmsh - 8-pole field pattern")
+    print("6. ✓ Python plots created - flux density analysis")
     print()
-    print("This demonstrates a complete 8-pole rotor FEA from motor parameters!")
+    print("This demonstrates a complete 8-pole rotor FEA with realistic airgap!")
     print()
     
     return 0

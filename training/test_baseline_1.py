@@ -51,7 +51,7 @@ getdp_templates = os.path.join(getdp_dir, 'templates')
 gmsh_exe = os.path.join(src_dir, 'gmsh', 'gmsh.exe')
 
 # Working directory for this example
-work_dir = os.path.join(script_dir, 'c_core_output')
+work_dir = os.path.join(script_dir, 'test_baseline_1_output')
 
 def create_geometry():
     """
