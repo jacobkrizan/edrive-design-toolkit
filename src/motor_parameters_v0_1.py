@@ -1,16 +1,76 @@
 """
 Motor Parameters Module
 Defines all design parameters and performance metrics for permanent magnet motors
+Loads parameters from Excel file for dynamic updates
 """
 
 import numpy as np
+import pandas as pd
+import os
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+
+def load_parameters_from_excel(excel_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load motor parameters from Excel file
+    
+    Args:
+        excel_path: Path to Excel file. If None, uses default project path.
+        
+    Returns:
+        Dictionary of parameter values
+    """
+    if excel_path is None:
+        # Default to example_design_1
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(script_dir)
+        excel_path = os.path.join(repo_root, 'projects', 'example_design_1', 
+                                  'example_design_1_edrive_parameters.xlsx')
+    
+    if not os.path.exists(excel_path):
+        print(f"Warning: Excel file not found at {excel_path}. Using default values.")
+        return {}
+    
+    try:
+        # Read motor sheet
+        motor_df = pd.read_excel(excel_path, sheet_name='motor')
+        motor_params = {}
+        
+        for _, row in motor_df.iterrows():
+            param_name = row.get('Parameter')
+            value = row.get('Value')
+            
+            if pd.notna(param_name) and pd.notna(value):
+                param_name = str(param_name).strip()
+                motor_params[param_name] = value
+        
+        # Read battery sheet for voltage
+        try:
+            battery_df = pd.read_excel(excel_path, sheet_name='battery')
+            for _, row in battery_df.iterrows():
+                param_name = row.get('Parameter')
+                value = row.get('Value')
+                
+                if pd.notna(param_name) and pd.notna(value):
+                    param_name = str(param_name).strip()
+                    motor_params[param_name] = value
+        except:
+            pass  # Battery sheet optional
+        
+        return motor_params
+        
+    except Exception as e:
+        print(f"Warning: Error loading Excel file: {e}. Using default values.")
+        return {}
 
 
 @dataclass
 class MotorParameters:
-    """Container for all motor design parameters"""
+    """Container for all motor design parameters - loads from Excel by default"""
+    
+    # Excel file path (set to None to use default project path)
+    excel_path: Optional[str] = None
     
     # Basic Configuration
     num_poles: int = 8
@@ -18,20 +78,23 @@ class MotorParameters:
     
     # Geometric Parameters (mm)
     stator_outer_diameter: float = 200.0
-    stator_inner_diameter: float = 120.0
-    rotor_outer_diameter: float = 110.0  # Rotor core outer diameter
-    rotor_inner_diameter: float = 40.0
+    stator_inner_diameter: float = 148.0  # Calculated: rotor_OD + 2*magnet_thickness + 2*airgap
+    rotor_outer_diameter: float = 138.0  # Rotor core outer diameter
+    rotor_inner_diameter: float = 50.0
     airgap_length: float = 1.0  # Gap between magnet outer surface and stator bore
     stack_length: float = 100.0
     
     # Slot Geometry
-    slot_depth: float = 30.0
-    slot_opening: float = 3.0
+    slot_width: float = 4.0  # Tangential width of slot
+    slot_height: float = 12.0  # Radial depth of slot
+    slot_opening: float = 1.0  # Narrow opening at airgap
+    tooth_tip_height: float = 0.5
+    tooth_taper_height: float = 0.5
     tooth_width: float = 5.0
     
     # Magnet Geometry (Surface Mount)
-    magnet_thickness: float = 5.0
-    magnet_arc_ratio: float = 0.85  # Magnet arc / pole pitch
+    magnet_thickness: float = 4.0
+    magnet_arc_ratio: float = 0.80  # Magnet arc / pole pitch (80%)
     
     # Winding Configuration
     turns_per_coil: int = 20
@@ -41,7 +104,7 @@ class MotorParameters:
     
     # Electrical Parameters
     rated_current: float = 100.0  # Arms
-    rated_voltage: float = 400.0  # Vrms (line-line)
+    rated_voltage: float = 100.0  # Vdc (battery voltage)
     rated_speed: float = 3000.0  # rpm
     frequency: float = 200.0  # Hz
     
@@ -61,21 +124,56 @@ class MotorParameters:
     max_winding_temp: float = 155.0  # °C (Class F insulation)
     
     def __post_init__(self):
-        """Calculate derived parameters"""
+        """Calculate derived parameters and optionally load from Excel"""
+        # Load from Excel if values match defaults (indicating no explicit override)
+        excel_params = load_parameters_from_excel(self.excel_path)
+        
+        if excel_params:
+            # Map Excel parameter names to class attributes
+            param_mapping = {
+                'motor_poles': 'num_poles',
+                'motor_airgap': 'airgap_length',
+                'stator_slots': 'num_slots',
+                'stator_core_stack_length': 'stack_length',
+                'stator_core_outer_diameter': 'stator_outer_diameter',
+                'stator_core_slot_width': 'slot_width',
+                'stator_core_slot_height': 'slot_height',
+                'stator_core_slot_opening': 'slot_opening',
+                'stator_core_tooth_tip_height': 'tooth_tip_height',
+                'stator_core_tooth_taper_height': 'tooth_taper_height',
+                'rotor_core_outer_diameter': 'rotor_outer_diameter',
+                'rotor_core_inner_diameter': 'rotor_inner_diameter',
+                'magnet_thickness': 'magnet_thickness',
+                'magnet_arc_percent': 'magnet_arc_ratio',  # Will convert % to ratio
+                'battery_voltage': 'rated_voltage',
+            }
+            
+            for excel_name, attr_name in param_mapping.items():
+                if excel_name in excel_params:
+                    value = excel_params[excel_name]
+                    
+                    # Special handling for percentage to ratio conversion
+                    if excel_name == 'magnet_arc_percent':
+                        value = value / 100.0  # Convert 80% to 0.80
+                    
+                    # Convert to int for countable parameters
+                    if attr_name in ['num_poles', 'num_slots']:
+                        value = int(value)
+                    
+                    setattr(self, attr_name, value)
+            
+            # Calculate stator inner diameter from rotor dimensions
+            magnet_outer_r = self.rotor_outer_diameter / 2 + self.magnet_thickness
+            self.stator_inner_diameter = (magnet_outer_r + self.airgap_length) * 2
+        
+        # Calculate derived parameters
         self.pole_pitch = np.pi * self.rotor_outer_diameter / self.num_poles
         self.slot_pitch = np.pi * self.stator_inner_diameter / self.num_slots
         self.slots_per_pole_per_phase = self.num_slots / (self.num_poles * 3)
         self.electrical_frequency = self.rated_speed * self.num_poles / 120.0
         
-        # Validate radial clearances for surface-mount PM motor
-        # Radial ordering: rotor_OD -> magnets -> airgap -> stator_ID
-        magnet_outer_radius = self.rotor_outer_diameter / 2 + self.magnet_thickness
-        required_stator_id = magnet_outer_radius * 2 + self.airgap_length * 2
-        
-        # Auto-adjust if needed to maintain proper airgap
-        if abs(self.stator_inner_diameter - required_stator_id) > 0.1:
-            # Adjust rotor OD to maintain specified airgap
-            self.rotor_outer_diameter = (self.stator_inner_diameter / 2 - self.airgap_length - self.magnet_thickness) * 2
+        # Derived slot parameter for backward compatibility
+        self.slot_depth = self.slot_height  # slot_depth is same as slot_height (radial dimension)
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary"""
