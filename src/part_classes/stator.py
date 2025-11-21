@@ -1,9 +1,12 @@
 """
-Stator Components
-Stator assembly and subcomponents
+Stator Component
+Stator assembly - parent component for windings, slot liner, and core
 """
 
-from typing import Optional, Dict
+from typing import Optional
+from .stator_core import StatorCore
+from .stator_windings import StatorWindings
+from .slot_liner import SlotLiner
 
 
 class Stator:
@@ -13,77 +16,43 @@ class Stator:
     """
     
     def __init__(self):
-        self.windings: Optional['StatorWindings'] = None
-        self.slot_liner: Optional['SlotLiner'] = None
-        self.core: Optional['StatorCore'] = None
+        # Parent reference for hierarchical access
+        self._parent: Optional['Motor'] = None
         
-        # Stator geometry
-        self.outer_diameter: Optional[float] = None  # mm
-        self.inner_diameter: Optional[float] = None  # mm
-        self.stack_length: Optional[float] = None  # mm
-        self.num_slots: Optional[int] = None
+        # Stator parameters from Excel
+        self.stator_slots: Optional[int] = None  # Number of slots
+        
+        # Sub-components - create instances so they can access parent
+        self.core: Optional[StatorCore] = StatorCore()
+        self.windings: Optional[StatorWindings] = StatorWindings()
+        self.slot_liner: Optional[SlotLiner] = SlotLiner()
+        
+        # Set parent reference for hierarchical access
+        self.core._parent = self
+        self.windings._parent = self
+        self.slot_liner._parent = self
         
     def __repr__(self):
-        return f"Stator(slots={self.num_slots}, OD={self.outer_diameter}mm, ID={self.inner_diameter}mm)"
-
-
-class StatorWindings:
-    """
-    Stator winding configuration
-    Copper coils in stator slots
-    """
+        return f"Stator(slots={self.stator_slots})"
     
-    def __init__(self):
-        # Winding configuration
-        self.num_phases: Optional[int] = None  # typically 3
-        self.turns_per_coil: Optional[int] = None
-        self.wire_diameter: Optional[float] = None  # mm
-        self.wire_type: Optional[str] = None  # e.g., "round", "rectangular"
-        self.parallel_paths: Optional[int] = None
-        self.slot_fill_factor: Optional[float] = None  # 0-1
-        
-        # Material properties
-        self.conductor_material: str = "Copper"
-        self.resistivity: Optional[float] = None  # ohm-m at operating temp
-        
-    def __repr__(self):
-        return f"StatorWindings(phases={self.num_phases}, turns={self.turns_per_coil})"
-
-
-class SlotLiner:
-    """
-    Electrical insulation in stator slots
-    Separates windings from core
-    """
+    def compute_mass(self) -> float:
+        """Calculate total stator mass (kg)"""
+        total_mass = 0.0
+        if self.core:
+            total_mass += self.core.compute_mass()
+        if self.windings:
+            total_mass += self.windings.compute_mass()
+        if self.slot_liner:
+            total_mass += self.slot_liner.compute_mass()
+        return total_mass
     
-    def __init__(self):
-        # Liner properties
-        self.material: Optional[str] = None  # e.g., "Nomex", "Mylar"
-        self.thickness: Optional[float] = None  # mm
-        self.dielectric_strength: Optional[float] = None  # kV/mm
-        self.thermal_conductivity: Optional[float] = None  # W/m-K
-        
-    def __repr__(self):
-        return f"SlotLiner(material={self.material}, thickness={self.thickness}mm)"
-
-
-class StatorCore:
-    """
-    Laminated steel core of stator
-    Provides magnetic flux path
-    """
-    
-    def __init__(self):
-        # Core material properties
-        self.material: Optional[str] = None  # e.g., "M19 Steel"
-        self.lamination_thickness: Optional[float] = None  # mm
-        self.stacking_factor: Optional[float] = None  # 0-1
-        self.permeability: Optional[float] = None  # relative
-        self.core_loss_coefficients: Optional[Dict] = None
-        
-        # Geometry
-        self.tooth_width: Optional[float] = None  # mm
-        self.yoke_thickness: Optional[float] = None  # mm
-        
-    def __repr__(self):
-        return f"StatorCore(material={self.material}, lamination={self.lamination_thickness}mm)"
+    def compute_cost(self) -> float:
+        """Calculate total stator cost ($)"""
+        total_cost = 0.0
+        if self.core:
+            total_cost += self.core.compute_cost()
+        if self.windings:
+            total_cost += self.windings.compute_cost()
+        if self.slot_liner:
+            total_cost += self.slot_liner.compute_cost()
+        return total_cost

@@ -13,12 +13,21 @@ class Gearbox:
     """
     
     def __init__(self):
-        # Gearbox properties
-        self.gear_ratio: Optional[float] = None
-        self.efficiency: Optional[float] = None  # 0-1
-        self.max_input_speed: Optional[float] = None  # rpm
-        self.max_torque: Optional[float] = None  # Nm
-        self.type: Optional[str] = None  # e.g., "planetary", "helical"
+        # Parent reference for hierarchical access
+        self._parent: Optional['DriveUnit'] = None
+        
+        # Gearbox properties from Excel
+        self.gearbox_ratio: Optional[float] = None  # Gear ratio
         
     def __repr__(self):
-        return f"Gearbox(ratio={self.gear_ratio}, type={self.type})"
+        return f"Gearbox(ratio={self.gearbox_ratio})"
+    
+    def compute_mass(self) -> float:
+        """Calculate gearbox mass (kg)"""
+        # TODO: Implement based on torque rating and gearbox type
+        return 0.0
+    
+    def compute_cost(self) -> float:
+        """Calculate gearbox cost ($)"""
+        # TODO: Implement based on complexity and torque rating
+        return 0.0

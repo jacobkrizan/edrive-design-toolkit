@@ -1,9 +1,13 @@
 """
-Rotor Components
-Rotor assembly and subcomponents
+Rotor Component
+Rotor assembly - parent component for core, magnets, shaft, and endplates
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List
+from .rotor_core import RotorCore
+from .magnet import Magnet
+from .shaft import Shaft
+from .endplate import Endplate
 
 
 class Rotor:
@@ -13,104 +17,49 @@ class Rotor:
     """
     
     def __init__(self):
-        self.core: Optional['RotorCore'] = None
-        self.magnets: List['Magnet'] = []
-        self.shaft: Optional['Shaft'] = None
-        self.endplates: List['Endplate'] = []
+        # Parent reference for hierarchical access
+        self._parent: Optional['Motor'] = None
         
-        # Rotor geometry
-        self.outer_diameter: Optional[float] = None  # mm
-        self.inner_diameter: Optional[float] = None  # mm
-        self.stack_length: Optional[float] = None  # mm
+        # Rotor parameters from Excel
+        # (currently no rotor-level parameters, all belong to sub-components)
+        
+        # Sub-components - create instances
+        self.core: RotorCore = RotorCore()
+        self.magnet: Magnet = Magnet()  # Single magnet instance (parameters apply to all poles)
+        self.shaft: Optional[Shaft] = Shaft()
+        self.endplates: List[Endplate] = []
+        
+        # Set parent references for hierarchical access
+        self.core._parent = self
+        self.magnet._parent = self
+        if self.shaft:
+            self.shaft._parent = self
         
     def __repr__(self):
-        return f"Rotor(magnets={len(self.magnets)}, OD={self.outer_diameter}mm)"
-
-
-class RotorCore:
-    """
-    Laminated steel core of rotor
-    Back iron for magnetic flux return path
-    """
+        return f"Rotor(core={self.core}, magnet={self.magnet})"
     
-    def __init__(self):
-        # Core material properties
-        self.material: Optional[str] = None  # e.g., "M19 Steel"
-        self.lamination_thickness: Optional[float] = None  # mm
-        self.stacking_factor: Optional[float] = None  # 0-1
-        self.permeability: Optional[float] = None  # relative
-        
-        # Geometry
-        self.back_iron_thickness: Optional[float] = None  # mm
-        
-    def __repr__(self):
-        return f"RotorCore(material={self.material}, back_iron={self.back_iron_thickness}mm)"
-
-
-class Magnet:
-    """
-    Permanent magnet
-    Provides excitation field
-    """
+    def compute_mass(self) -> float:
+        """Calculate total rotor mass (kg)"""
+        total_mass = 0.0
+        if self.core:
+            total_mass += self.core.compute_mass()
+        if self.magnet:
+            total_mass += self.magnet.compute_mass()
+        if self.shaft:
+            total_mass += self.shaft.compute_mass()
+        for endplate in self.endplates:
+            total_mass += endplate.compute_mass()
+        return total_mass
     
-    def __init__(self):
-        # Magnet properties
-        self.material: Optional[str] = None  # e.g., "NdFeB N42"
-        self.remanence: Optional[float] = None  # T (Br)
-        self.coercivity: Optional[float] = None  # A/m (Hc)
-        self.relative_permeability: Optional[float] = None
-        self.max_operating_temp: Optional[float] = None  # °C
-        
-        # Geometry
-        self.thickness: Optional[float] = None  # mm (radial)
-        self.width: Optional[float] = None  # mm (tangential)
-        self.length: Optional[float] = None  # mm (axial)
-        self.pole_arc_ratio: Optional[float] = None  # 0-1
-        
-        # Mounting
-        self.mounting_type: Optional[str] = None  # e.g., "surface", "interior", "inset"
-        
-    def __repr__(self):
-        return f"Magnet(material={self.material}, Br={self.remanence}T, thickness={self.thickness}mm)"
-
-
-class Shaft:
-    """
-    Rotating shaft
-    Mechanical power transmission
-    """
-    
-    def __init__(self):
-        # Shaft properties
-        self.material: Optional[str] = None  # e.g., "Steel 4140"
-        self.diameter: Optional[float] = None  # mm
-        self.length: Optional[float] = None  # mm
-        self.yield_strength: Optional[float] = None  # MPa
-        
-        # Features
-        self.keyway: bool = False
-        self.spline: bool = False
-        
-    def __repr__(self):
-        return f"Shaft(material={self.material}, diameter={self.diameter}mm)"
-
-
-class Endplate:
-    """
-    Rotor endplate
-    Axial retention of rotor components
-    """
-    
-    def __init__(self):
-        # Endplate properties
-        self.material: Optional[str] = None  # e.g., "Aluminum", "Steel"
-        self.thickness: Optional[float] = None  # mm
-        self.outer_diameter: Optional[float] = None  # mm
-        self.inner_diameter: Optional[float] = None  # mm
-        
-        # Mounting
-        self.fastener_type: Optional[str] = None  # e.g., "bolt", "rivet"
-        self.num_fasteners: Optional[int] = None
-        
-    def __repr__(self):
-        return f"Endplate(material={self.material}, thickness={self.thickness}mm)"
+    def compute_cost(self) -> float:
+        """Calculate total rotor cost ($)"""
+        total_cost = 0.0
+        if self.core:
+            total_cost += self.core.compute_cost()
+        if self.magnet:
+            total_cost += self.magnet.compute_cost()
+        if self.shaft:
+            total_cost += self.shaft.compute_cost()
+        for endplate in self.endplates:
+            total_cost += endplate.compute_cost()
+        return total_cost

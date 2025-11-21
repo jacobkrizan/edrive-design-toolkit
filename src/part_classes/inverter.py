@@ -13,12 +13,21 @@ class Inverter:
     """
     
     def __init__(self):
-        # Inverter properties
-        self.rated_voltage: Optional[float] = None  # V DC
-        self.rated_current: Optional[float] = None  # A
-        self.switching_frequency: Optional[float] = None  # Hz
-        self.efficiency: Optional[float] = None  # 0-1
-        self.topology: Optional[str] = None  # e.g., "3-phase bridge"
+        # Parent reference for hierarchical access
+        self._parent: Optional['DriveUnit'] = None
+        
+        # Inverter properties from Excel
+        self.inverter_max_current: Optional[float] = None  # A RMS
         
     def __repr__(self):
-        return f"Inverter(voltage={self.rated_voltage}V, current={self.rated_current}A)"
+        return f"Inverter(max_current={self.inverter_max_current}A)"
+    
+    def compute_mass(self) -> float:
+        """Calculate inverter mass (kg)"""
+        # TODO: Implement based on power rating and power density
+        return 0.0
+    
+    def compute_cost(self) -> float:
+        """Calculate inverter cost ($)"""
+        # TODO: Implement based on power rating and cost per kW
+        return 0.0

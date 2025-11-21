@@ -13,12 +13,21 @@ class Battery:
     """
     
     def __init__(self):
-        # Battery properties
-        self.voltage_nominal: Optional[float] = None  # V
-        self.capacity: Optional[float] = None  # Ah
-        self.energy: Optional[float] = None  # Wh
-        self.chemistry: Optional[str] = None  # e.g., "NMC", "LFP"
-        self.cell_configuration: Optional[str] = None  # e.g., "96s2p"
+        # Parent reference for hierarchical access
+        self._parent: Optional['Powertrain'] = None
+        
+        # Battery properties from Excel
+        self.battery_voltage: Optional[float] = None  # V DC
         
     def __repr__(self):
-        return f"Battery({self.voltage_nominal}V, {self.capacity}Ah, {self.chemistry})"
+        return f"Battery({self.battery_voltage}V)"
+    
+    def compute_mass(self) -> float:
+        """Calculate battery mass (kg)"""
+        # TODO: Implement based on energy capacity and specific energy
+        return 0.0
+    
+    def compute_cost(self) -> float:
+        """Calculate battery cost ($)"""
+        # TODO: Implement based on energy capacity and cost per kWh
+        return 0.0
