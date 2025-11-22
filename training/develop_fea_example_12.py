@@ -1,4 +1,4 @@
-"""develop_fea_example_11.py - Motor FEA with Independent PM and 3-Phase Winding Control
+"""develop_fea_example_12.py - Motor FEA with Independent PM and 3-Phase Winding Control
 ====================================================================================
 
 This script builds a complete FEA model of a surface-mounted PM motor with 
@@ -79,7 +79,7 @@ Post-Processing:
 - Complete motor cross-section plot (shaft, rotor, magnets, slotted stator, air regions)
 - 2D flux density colormap and airgap flux profile
 - Stator back iron diagnostics verify flux penetration into steel
-- All output files and plots saved to develop_fea_example_11_output/
+- All output files and plots saved to develop_fea_example_12_output/
 
 Expected Results:
 - Complete motor FEA with physically accurate slotted stator geometry
@@ -116,7 +116,7 @@ getdp_templates = os.path.join(getdp_dir, 'templates')
 gmsh_exe = os.path.join(src_dir, 'gmsh', 'gmsh.exe')
 
 # Working directory for this example
-work_dir = os.path.join(script_dir, 'develop_fea_example_11_output')
+work_dir = os.path.join(script_dir, 'develop_fea_example_12_output')
 
 # ============================================================================
 # USER CONFIGURATION - Analysis and Mesh Control
